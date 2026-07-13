@@ -1,0 +1,26 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# --- Fetched/generated at build time, not source. Reproduce with tools/fetch_runtime.py ---
+app/src/main/jniLibs/
+tools/.deb-cache/
+
+# SillyTavern's own node_modules, bundled as a build asset — not this app's source.
+app/src/main/assets/node_modules.zip
+
+# Signing keys — NEVER commit these
+*.keystore
+*.jks

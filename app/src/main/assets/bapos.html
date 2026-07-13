@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Weyland Tavern</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  :root { --sab: env(safe-area-inset-bottom, 48px); --sat: env(safe-area-inset-top, 0px); }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0608;
+    -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  @keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0; } }
+  @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+  @keyframes splashPulse { 0%,100% { transform:scale(1); } 50% { transform:scale(1.04); } }
+  @keyframes splashBar { 0% { width:0%; } 100% { width:100%; } }
+  @keyframes slowSpin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
+  @keyframes btnPress { 0% { transform:scale(1); } 50% { transform:scale(0.97); } 100% { transform:scale(1); } }
+  @keyframes dotPulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+  @keyframes sleepy { 0% { transform:translateY(0); opacity:1; } 100% { transform:translateY(8px); opacity:0.6; } }
+
+  .screen { position: fixed; inset: 0; display: none; padding-bottom: calc(var(--sab) + 12px); }
+  .screen.active { display: flex; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+
+  /* ---------- GATE ---------- */
+  #gate { background:#0a0608; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; font-family:sans-serif; z-index:60; }
+  #gate img { width: 110px; height: 110px; border-radius: 26px; margin-bottom: 18px; }
+
+  /* ---------- GREETING (first-run orientation) ---------- */
+  #greeting { background:#0a0608; flex-direction:column; align-items:center; justify-content:center; font-family:sans-serif; z-index:56; padding:28px; padding-bottom: calc(var(--sab) + 28px); text-align:center; overflow-y:auto; }
+  #greeting .card {
+    background: rgba(20,14,18,0.92); border:1px solid rgba(180,38,58,0.35); border-radius:14px;
+    padding:22px; max-width:420px; color:#c9c9c9; font-size:14px; line-height:1.65; text-align:left;
+  }
+  #greeting .card b { color:#eee; }
+  #greeting .card .whisper { color:#8a8a8a; font-size:12px; font-style:italic; }
+  #greeting .card .sig { color:#9b7bb8; }
+  #greeting .card ul { margin:12px 0 0 0; padding-left:20px; }
+  #greeting .card li { margin-bottom:10px; }
+  #greeting .card li:last-child { margin-bottom:0; }
+
+  /* ---------- WELCOME ---------- */
+  #welcome { background:#0a0608; flex-direction:column; align-items:center; justify-content:center; font-family:sans-serif; z-index:55; padding:28px; padding-bottom: calc(var(--sab) + 28px); text-align:center; overflow-y:auto; }
+  #welcome .card {
+    background: rgba(20,14,18,0.92); border:1px solid rgba(180,38,58,0.35); border-radius:14px;
+    padding:22px; max-width:420px; color:#c9c9c9; font-size:14px; line-height:1.65; text-align:left;
+  }
+  #welcome .card b { color:#eee; }
+  #welcome .step { display:flex; gap:10px; margin-top:10px; }
+  #welcome .step .n { color:#b4263a; font-weight:bold; font-family:'JetBrains Mono',monospace; }
+
+  /* ---------- BOOT ---------- */
+  #boot { background:#0a0608; padding:18px; padding-bottom: calc(var(--sab) + 18px); font-family:'JetBrains Mono',monospace; font-size:10px; color:#c0c0c0; overflow:hidden; z-index:50; }
+  #boot .scanlines { position:absolute; inset:0; pointer-events:none; opacity:0.03;
+    background:repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255,255,255,0.1) 2px, rgba(255,255,255,0.1) 4px); }
+  #bootScroll { height:100%; overflow:auto; position:relative; width:100%; }
+  .bootline { min-height:8px; white-space:pre-wrap; max-height:999999px; /* max-height defeats WebView font boosting */ }
+  .ok { color:#4ade80; } .skip { color:#e9c46a; } .welcome { color:#b4263a; } .boldline { font-weight:bold; }
+  .wine { color:#b4263a; } .pink { color:#e05070; } .rose { color:#ff96a5; }
+  .asciiBanner { white-space:pre; font-size:min(2.2vw, 8.5px); line-height:1.2; overflow:hidden; max-height:999999px; }
+  #progWrap { margin:2px 0; }
+  #progText { color:#888; font-size:11px; margin-bottom:3px; }
+  #progBarOuter { width:260px; max-width:80vw; height:6px; background:rgba(255,255,255,0.06); border-radius:3px; overflow:hidden; }
+  #progBarInner { height:100%; border-radius:3px; background:linear-gradient(90deg,#b4263a,#e05070); width:0%; transition:width 0.08s linear; }
+  #cursor { animation:blink 1s step-end infinite; color:#b4263a; }
+  #skipHint { position:absolute; bottom: calc(var(--sab) + 14px); right:18px; color:#555; font-size:11px; }
+
+  /* ---------- SPLASH ---------- */
+  #splash { background:#0a0608; flex-direction:column; align-items:center; justify-content:center; animation:fadeIn 0.5s ease; z-index:48; font-family:sans-serif; }
+  #splashCircle { width:180px; height:180px; border-radius:50%;
+    background:radial-gradient(circle, rgba(180,38,58,0.3) 0%, rgba(180,38,58,0.05) 70%, transparent 100%);
+    border:2px solid rgba(180,38,58,0.4); display:flex; align-items:center; justify-content:center; flex-direction:column; gap:6px;
+    animation:splashPulse 1.5s ease infinite; box-shadow:0 0 60px rgba(180,38,58,0.3); }
+  #splashCircle img { width:84px; height:84px; border-radius:20px; }
+
+  /* ---------- HOME ---------- */
+  #home { flex-direction:column; align-items:center;
+    background:
+      radial-gradient(ellipse at 20% 80%, rgba(180,38,58,0.15) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 20%, rgba(180,38,58,0.1) 0%, transparent 50%),
+      radial-gradient(ellipse at 50% 50%, rgb(30,20,25) 0%, rgb(15,10,15) 100%);
+    font-family:sans-serif; animation:fadeIn 0.6s ease; z-index:30; user-select:none; overflow:hidden;
+    padding-bottom: 0; /* taskbar handles its own bottom padding */ }
+  #home .grid { position:absolute; inset:0; background-image:radial-gradient(rgba(180,38,58,0.05) 1px, transparent 1px); background-size:24px 24px; pointer-events:none; }
+  #pentagram { position:absolute; top:50%; left:50%; width:130vw; height:130vw; max-width:700px; max-height:700px;
+    margin-left:max(-65vw,-350px); margin-top:max(-65vw,-350px); opacity:0.07; pointer-events:none; animation:slowSpin 90s linear infinite; }
+  #homeInner { position:relative; z-index:2; flex:1; width:100%; max-width:420px; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; padding:24px; }
+  #homeHeader { text-align:center; margin-bottom:26px; }
+  #homeHeader img { width:88px; height:88px; border-radius:22px; margin-bottom:10px; }
+  #homeHeader .title { color:#eee; font-size:26px; font-weight:700; letter-spacing:2px; }
+  #homeHeader .title .red { color:#b4263a; }
+  #homeHeader .subtitle { color:#777; font-size:11px; margin-top:5px; font-family:'JetBrains Mono',monospace; letter-spacing:1px; }
+
+  #serverDot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:7px; vertical-align:1px; }
+  .dotUp { background:#4ade80; box-shadow:0 0 8px rgba(74,222,128,0.7); animation:dotPulse 2s ease infinite; }
+  .dotDown { background:#666; }
+  .dotStarting { background:#e9c46a; box-shadow:0 0 8px rgba(233,196,106,0.6); animation:dotPulse 0.8s ease infinite; }
+  #serverState { color:#999; font-size:12px; font-family:'JetBrains Mono',monospace; margin-bottom:20px; }
+
+  .bapbtn { width:100%; padding:16px 20px; margin-bottom:13px; border-radius:12px; font-size:15px; font-weight:600;
+    letter-spacing:1px; font-family:sans-serif; cursor:pointer; border:1px solid rgba(180,38,58,0.35);
+    background:rgba(20,14,18,0.92); color:#eee; display:flex; align-items:center; gap:14px;
+    transition:background 0.15s, opacity 0.2s; backdrop-filter:blur(8px); }
+  .bapbtn:active { animation:btnPress 0.18s ease; background:rgba(180,38,58,0.25); }
+  .bapbtn .ico { font-size:20px; width:26px; text-align:center; }
+  .bapbtn .lbl { flex:1; text-align:left; }
+  .bapbtn .sub { font-size:10px; color:#888; font-weight:400; display:block; margin-top:2px; letter-spacing:0; }
+  .bapbtn.disabled { opacity:0.35; pointer-events:none; }
+  #btnLaunch { background:linear-gradient(135deg,#b4263a,#8e1d2e); border-color:rgba(224,80,112,0.5); box-shadow:0 4px 24px rgba(180,38,58,0.35); }
+  #btnLaunch .sub { color:rgba(255,255,255,0.55); }
+  #btnUpdate { display:none; border-color:rgba(233,196,106,0.5); }
+  #btnUpdate .lbl { color:#e9c46a; }
+
+  #statusLine { margin-top:8px; min-height:34px; text-align:center; color:#8c8c8c; font-size:12px;
+    font-family:'JetBrains Mono',monospace; line-height:1.5; padding:0 8px; }
+
+  #taskbar { position:relative; z-index:2; width:100%; flex-shrink:0;
+    padding: 0 12px; padding-bottom: calc(var(--sab) + 6px); height: calc(46px + var(--sab) + 6px);
+    background:rgba(15,10,14,0.92); border-top:1px solid rgba(180,38,58,0.2); backdrop-filter:blur(16px);
+    display:flex; align-items:flex-start; padding-top:8px; font-family:sans-serif; }
+  #taskbar img { width:30px; height:30px; border-radius:8px; }
+  #taskbar .ver { flex:1; margin-left:10px; color:#666; font-size:10px; font-family:'JetBrains Mono',monospace; line-height:30px; }
+  #clock { font-family:'JetBrains Mono',monospace; font-size:12px; color:#eee; margin-right:12px; line-height:30px; }
+  #clock .date { opacity:0.5; margin-left:8px; font-size:11px; }
+  #gearBtn { width:34px; height:34px; border-radius:9px; background:rgba(180,38,58,0.1); border:1px solid rgba(180,38,58,0.3);
+    display:flex; align-items:center; justify-content:center; font-size:17px; cursor:pointer; color:#c9c9c9; }
+
+  /* ---------- SETTINGS ---------- */
+  #settings { background:rgba(5,3,4,0.85); backdrop-filter:blur(6px); z-index:70; align-items:center; justify-content:center; font-family:sans-serif; }
+  #settingsCard { background:rgba(20,14,18,0.97); border:1px solid rgba(180,38,58,0.35); border-radius:14px;
+    width:90%; max-width:380px; max-height:80vh; overflow:auto; padding:20px; padding-bottom: calc(20px + var(--sab)); color:#ddd; }
+  #settingsCard h2 { color:#b4263a; font-size:17px; letter-spacing:2px; margin-bottom:14px; }
+  .setRow { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:11px 0; border-bottom:1px solid rgba(255,255,255,0.05); font-size:14px; }
+  .setRow .d { color:#777; font-size:11px; margin-top:2px; }
+  .setBtn { padding:8px 14px; border-radius:9px; border:1px solid rgba(180,38,58,0.4); background:rgba(180,38,58,0.12);
+    color:#eee; font-size:12px; cursor:pointer; white-space:nowrap; font-family:sans-serif; }
+  .setBtn.danger { border-color:rgba(255,80,80,0.5); background:rgba(180,38,38,0.18); color:#ff9b9b; }
+  #settingsClose { margin-top:16px; width:100%; }
+
+  /* ---------- ABOUT ---------- */
+  #about { background:rgba(5,3,4,0.85); backdrop-filter:blur(6px); z-index:70; align-items:center; justify-content:center; font-family:sans-serif; }
+  .aboutSection { color:#b4263a; font-size:11px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; margin:4px 0 10px; }
+  .aboutGroup { color:#999; font-size:11px; font-weight:600; letter-spacing:0.5px; margin:14px 0 4px; padding-left:2px; }
+  .aboutLink { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:11px 10px; margin-bottom:6px;
+    border-radius:9px; border:1px solid rgba(180,38,58,0.25); background:rgba(180,38,58,0.08); color:#ddd; font-size:13px; cursor:pointer; }
+  .aboutLink .arrow { color:#b4263a; font-size:15px; }
+  .aboutLink.disabled { opacity:0.45; pointer-events:none; }
+  .aboutLink.disabled .arrow { color:#777; font-size:10px; font-style:italic; }
+
+  /* ---------- LOG VIEWER ---------- */
+  #logs { background:#0a0608; z-index:75; flex-direction:column; padding:14px; padding-bottom: calc(14px + var(--sab)); font-family:'JetBrains Mono',monospace; }
+  #logHead { display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
+  #logHead .t { flex:1; color:#b4263a; font-weight:bold; font-size:14px; letter-spacing:1px; min-width:100px; }
+  #logBody { flex:1; overflow:auto; background:rgba(255,255,255,0.03); border:1px solid rgba(180,38,58,0.2);
+    border-radius:10px; padding:10px; color:#9fdf9f; font-size:10.5px; white-space:pre-wrap; word-break:break-all; }
+
+  /* ---------- SHUTDOWN ---------- */
+  #shutdown { background:#0a0608; flex-direction:column; align-items:center; justify-content:center; z-index:80; font-family:sans-serif; }
+  #shutdown img { width:96px; height:96px; border-radius:22px; margin-bottom:16px; animation:sleepy 2.4s ease forwards; }
+
+  /* ---------- ERROR ---------- */
+  #error { background:#0a0608; flex-direction:column; align-items:center; justify-content:center; z-index:85; font-family:sans-serif; padding:26px; text-align:center; }
+  #errCard { background:rgba(30,14,16,0.95); border:1px solid rgba(255,80,80,0.4); border-radius:14px; padding:22px; max-width:400px; }
+</style>
+</head>
+<body>
+
+<!-- GATE -->
+<div id="gate" class="screen">
+  <img src="weytav_icon.png" alt="">
+  <div style="color:#eee; font-size:26px; font-weight:700; letter-spacing:2px;">WEYLAND <span style="color:#b4263a;">TAVERN</span></div>
+  <div style="color:#666; font-size:12px; margin:6px 0 44px 0; font-family:'JetBrains Mono',monospace;">powered by BapOS</div>
+  <div style="color:#888; font-size:14px; animation:blink 1.5s ease-in-out infinite;">Tap anywhere to power on</div>
+</div>
+
+<!-- GREETING (first-run orientation, hosted by Kressa) -->
+<div id="greeting" class="screen">
+  <img src="weytav_icon.png" style="width:92px; height:92px; border-radius:22px; margin-bottom:16px;" alt="">
+  <div style="color:#eee; font-size:21px; font-weight:700; margin-bottom:14px;">Welcome to <span style="color:#b4263a;">Weyland Tavern</span>!</div>
+  <div class="card">
+    Hey! Welcome to Weyland Tavern's mobile port, powered by BapOS! I'm <b class="sig">Kressa</b>, Weyland University's support staff~
+    <br><br>
+    Before we install anything on your phone, you deserve a proper briefing. So, real quick...
+    <ul>
+      <li><b>Weyland Tavern</b> is a private roleplay platform with a whole cast of characters and campus lore, lovingly maintained by the Weyland team.</li>
+      <li>Everything runs <b>locally on your device</b>, but API calls (Sonnet, Gemini, etc) are sent across the Weyland backend for processing unless you're using your own API provider. Your chatlogs themselves live on your phone, not on somebody's server!</li>
+      <li>Weyland Tavern is a custom, heavily modified distro of <b>SillyTavern</b>, the wonderful open-source project by Cohee, RossAscends and the SillyTavern community. We stand on their shoulders and we're very grateful for it!</li>
+      <li>This app installs the Tavern, keeps it updated, and runs the whole server for you. No terminal, no scary commands — you tap buttons and Bap, our adorable antichrist catgirl, does the rest.</li>
+    </ul>
+    <br>
+    <span class="whisper">That's the tour! Next screen goes over the one-time setup. See you inside!~ &nbsp;—Kressa</span>
+  </div>
+  <button class="bapbtn" id="btnGreetContinue" style="max-width:420px; margin-top:16px;">
+    <span class="ico">🎓</span><span class="lbl">GOT IT, LET'S GO<span class="sub">Continue to setup</span></span>
+  </button>
+</div>
+
+<!-- WELCOME -->
+<div id="welcome" class="screen">
+  <img src="weytav_icon.png" style="width:92px; height:92px; border-radius:22px; margin-bottom:16px;" alt="">
+  <div style="color:#eee; font-size:21px; font-weight:700; margin-bottom:14px;">Welcome to Weyland Tavern Mobile!</div>
+  <div class="card">
+    Hi there! 🐾 Before the fun starts, BapOS needs to set up Weyland Tavern on this phone. <b>This happens once.</b> Here's exactly what it will do:
+    <div class="step"><span class="n">1.</span><span>Download Weyland Tavern from our official GitHub (<b>~700 MB</b> — WiFi strongly recommended!)</span></div>
+    <div class="step"><span class="n">2.</span><span>Unpack everything into the app's private storage (needs ~2 GB free)</span></div>
+    <div class="step"><span class="n">3.</span><span>Enroll you at Weyland University ✨</span></div>
+    <div style="margin-top:12px; color:#e9c46a; font-size:12px;">🔊 Heads up: BapOS uses sound effects! Lower your volume if you're in public.</div>
+    <div style="margin-top:8px; color:#999; font-size:12px;">Future launches skip all this. Updates only download what changed.</div>
+  </div>
+  <button class="bapbtn" id="btnBattery" style="max-width:420px; margin-top:16px;">
+    <span class="ico">🔋</span><span class="lbl">ALLOW BACKGROUND RUNNING<span class="sub">Prevents your phone from killing the server (recommended!)</span></span>
+  </button>
+  <button class="bapbtn" id="btnEnroll" style="max-width:420px; margin-top:4px;">
+    <span class="ico">📋</span><span class="lbl">BEGIN ENROLLMENT<span class="sub">Start one-time setup</span></span>
+  </button>
+</div>
+
+<!-- BOOT -->
+<div id="boot" class="screen">
+  <div class="scanlines"></div>
+  <div id="bootScroll">
+    <div id="bootLines"></div>
+    <div id="progWrap" style="display:none;">
+      <div id="progText"></div>
+      <div id="progBarOuter"><div id="progBarInner"></div></div>
+    </div>
+    <span id="cursor">▊</span>
+  </div>
+  <div id="skipHint" style="display:none;">tap anywhere to skip ›</div>
+</div>
+
+<!-- SPLASH -->
+<div id="splash" class="screen">
+  <div id="splashCircle"><img src="weytav_icon.png" alt=""></div>
+  <div style="color:#eee; font-size:18px; font-weight:700; letter-spacing:2px; margin-top:16px;">WEYLAND <span style="color:#b4263a;">TAVERN</span></div>
+  <div style="color:#666; font-size:11px; margin-top:4px; font-family:'JetBrains Mono',monospace;">powered by BapOS</div>
+  <div style="margin-top:28px; width:220px; height:3px; background:rgba(180,38,58,0.15); border-radius:2px; overflow:hidden;">
+    <div style="height:100%; background:#b4263a; border-radius:2px; animation:splashBar 2.5s ease-in-out;"></div>
+  </div>
+</div>
+
+<!-- HOME -->
+<div id="home" class="screen">
+  <div class="grid"></div>
+  <svg id="pentagram" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+    <circle cx="50" cy="50" r="47" fill="none" stroke="#b4263a" stroke-width="0.8"/>
+    <circle cx="50" cy="50" r="40" fill="none" stroke="#b4263a" stroke-width="0.4"/>
+    <path d="M50 10 L73.5 82.4 L11.9 37.6 L88.1 37.6 L26.5 82.4 Z" fill="none" stroke="#b4263a" stroke-width="0.8"/>
+  </svg>
+
+  <div id="homeInner">
+    <div id="homeHeader">
+      <img src="weytav_icon.png" alt="">
+      <div class="title">WEYLAND <span class="red">TAVERN</span></div>
+      <div class="subtitle">POWERED BY BAPOS v5.0</div>
+    </div>
+
+    <div id="serverState"><span id="serverDot" class="dotDown"></span><span id="serverStateText">Server offline</span></div>
+
+    <button class="bapbtn" id="btnLaunch">
+      <span class="ico">🏰</span><span class="lbl">LAUNCH TAVERN<span class="sub">Wake the server up, nya~</span></span>
+    </button>
+
+    <button class="bapbtn disabled" id="btnOpen">
+      <span class="ico">🚪</span><span class="lbl">ENTER TAVERN<span class="sub">Opens in your browser</span></span>
+    </button>
+
+    <button class="bapbtn" id="btnUpdate" style="display:none;">
+      <span class="ico">✨</span><span class="lbl">UPDATE AVAILABLE<span class="sub">Sync the latest campus records</span></span>
+    </button>
+
+    <button class="bapbtn" id="btnStop">
+      <span class="ico">🌙</span><span class="lbl">SHUT DOWN<span class="sub">Tuck the Tavern in for the night</span></span>
+    </button>
+
+    <button class="bapbtn" id="btnCommunity">
+      <span class="ico">💬</span><span class="lbl">SUBSCRIPTIONS, SUPPORT &amp; COMMUNITY<span class="sub">linktr.ee/WeylandUniversity</span></span>
+    </button>
+
+    <div id="statusLine">All systems nominal.</div>
+  </div>
+
+  <div id="taskbar">
+    <img src="weytav_icon.png" alt="">
+    <div class="ver" id="verLine">BapOS v5.0</div>
+    <div id="clock"></div>
+    <div id="gearBtn">⚙️</div>
+  </div>
+</div>
+
+<!-- SETTINGS -->
+<div id="settings" class="screen">
+  <div id="settingsCard">
+    <h2>⚙ SETTINGS</h2>
+    <div class="setRow">
+      <div>Boot sounds<div class="d">Retro HDD noises &amp; chimes</div></div>
+      <button class="setBtn" id="setSound">ON</button>
+    </div>
+    <div class="setRow">
+      <div>Battery exemption<div class="d">Stops Android from killing the server</div></div>
+      <button class="setBtn" id="setBattery">REQUEST</button>
+    </div>
+    <div class="setRow">
+      <div>Server logs<div class="d">For troubleshooting with support</div></div>
+      <button class="setBtn" id="setLogs">VIEW</button>
+    </div>
+    <div class="setRow">
+      <div>Repair<div class="d">Wipes app files back to official version. Chats &amp; characters are safe!</div></div>
+      <button class="setBtn" id="setRepair">REPAIR</button>
+    </div>
+    <div class="setRow">
+      <div>Reinstall<div class="d">Wipes and re-downloads. Chats lost!</div></div>
+      <button class="setBtn danger" id="setReinstall">REINSTALL</button>
+    </div>
+    <div class="setRow">
+      <div>Delete installation<div class="d">Removes Weyland Tavern from this phone</div></div>
+      <button class="setBtn danger" id="setDelete">DELETE</button>
+    </div>
+    <div class="setRow">
+      <div>About<div class="d">Open-source software &amp; licenses</div></div>
+      <button class="setBtn" id="setAbout">VIEW</button>
+    </div>
+    <div class="setRow" style="border-bottom:none;">
+      <div>Installed version<div class="d mono" id="setVersion">unknown</div></div>
+    </div>
+    <button class="bapbtn" id="settingsClose"><span class="ico">↩</span><span class="lbl">CLOSE</span></button>
+  </div>
+</div>
+
+<!-- ABOUT / OPEN-SOURCE -->
+<div id="about" class="screen">
+  <div id="settingsCard">
+    <h2>ℹ ABOUT</h2>
+
+    <div class="aboutSection">Open-Source Software</div>
+
+    <div class="aboutGroup">Weyland Tavern Source Code</div>
+    <div class="aboutLink disabled" id="linkAppRepo">
+      <span>BapOS (this app) — source code</span><span class="arrow">coming soon</span>
+    </div>
+    <div class="aboutLink" data-url="https://github.com/Shirubaurufu/WeylandTavern">
+      <span>Weyland Tavern — source code</span><span class="arrow">›</span>
+    </div>
+
+    <div class="aboutGroup">SillyTavern Upstream Project</div>
+    <div class="aboutLink" data-url="https://github.com/SillyTavern/SillyTavern">
+      <span>SillyTavern — original repository</span><span class="arrow">›</span>
+    </div>
+
+    <div class="aboutGroup">License</div>
+    <div class="aboutLink" data-url="https://www.gnu.org/licenses/agpl-3.0.html">
+      <span>GNU AGPL-3.0</span><span class="arrow">›</span>
+    </div>
+    <div class="d" style="padding:0 2px 10px;">
+      Weyland Tavern is a modified version of SillyTavern, licensed under the GNU Affero General Public License v3. Because it's offered as a network service, you're entitled to the complete corresponding source code — see the links above.
+    </div>
+
+    <div class="aboutGroup">Third-Party Licenses (bundled runtime)</div>
+    <div class="aboutLink" data-url="https://github.com/nodejs/node/blob/main/LICENSE">
+      <span>Node.js</span><span class="arrow">›</span>
+    </div>
+    <div class="aboutLink" data-url="https://github.com/unicode-org/icu/blob/main/LICENSE">
+      <span>ICU</span><span class="arrow">›</span>
+    </div>
+    <div class="aboutLink" data-url="https://www.openssl.org/source/license.html">
+      <span>OpenSSL</span><span class="arrow">›</span>
+    </div>
+
+    <button class="bapbtn" id="aboutClose" style="margin-top:16px;"><span class="ico">↩</span><span class="lbl">BACK TO SETTINGS</span></button>
+  </div>
+</div>
+
+<!-- LOG VIEWER -->
+<div id="logs" class="screen">
+  <div id="logHead">
+    <div class="t">SERVER LOGS</div>
+    <button class="setBtn" id="logCopy">COPY</button>
+    <button class="setBtn" id="logRefresh">REFRESH</button>
+    <button class="setBtn" id="logClose">CLOSE</button>
+  </div>
+  <div id="logBody">loading...</div>
+</div>
+
+<!-- SHUTDOWN -->
+<div id="shutdown" class="screen">
+  <img src="weytav_icon.png" alt="">
+  <div style="color:#b4263a; font-size:20px; font-weight:700; letter-spacing:2px;">Good night, nya~</div>
+  <div style="color:#777; font-size:13px; margin-top:8px; font-family:'JetBrains Mono',monospace;" id="shutdownText">Tucking in the Tavern...</div>
+</div>
+
+<!-- ERROR -->
+<div id="error" class="screen">
+  <div id="errCard">
+    <div style="font-size:44px; margin-bottom:8px;">😿</div>
+    <div style="color:#ff9b9b; font-size:17px; font-weight:700; margin-bottom:10px;">Something went wrong</div>
+    <div style="color:#bbb; font-size:13px; line-height:1.6;" id="errMsg">Unknown error</div>
+    <button class="bapbtn" id="errLogs" style="margin-top:18px;"><span class="ico">📜</span><span class="lbl">VIEW LOGS</span></button>
+    <button class="bapbtn" id="errHome"><span class="ico">↩</span><span class="lbl">BACK</span></button>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// SOUND ENGINE
+// ============================================================
+class BapAudio {
+  constructor() { this.ctx = null; this.masterGain = null; this.humOsc = null; this.humGain = null; this.muted = false; }
+  init() {
+    if (this.ctx) return;
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    this.masterGain = this.ctx.createGain();
+    this.masterGain.gain.value = this.muted ? 0 : 0.3;
+    this.masterGain.connect(this.ctx.destination);
+  }
+  setMuted(m) { this.muted = m; if (this.masterGain) this.masterGain.gain.value = m ? 0 : 0.3; }
+  postBeep() { if (!this.ctx) return; const o=this.ctx.createOscillator(),g=this.ctx.createGain(); o.type='square'; o.frequency.value=800; g.gain.setValueAtTime(0.15,this.ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.001,this.ctx.currentTime+0.2); o.connect(g); g.connect(this.masterGain); o.start(); o.stop(this.ctx.currentTime+0.2); }
+  hddSeek(d=0.8) { if (!this.ctx) return; const n=this.ctx.currentTime,c=Math.floor(d/0.06); for(let i=0;i<c;i++){const t=n+i*0.06+Math.random()*0.02,b=this.ctx.createBuffer(1,256,this.ctx.sampleRate),a=b.getChannelData(0); for(let j=0;j<256;j++)a[j]=(Math.random()*2-1)*(1-j/256); const s=this.ctx.createBufferSource();s.buffer=b; const f=this.ctx.createBiquadFilter();f.type='bandpass';f.frequency.value=2000+Math.random()*2000;f.Q.value=5; const g=this.ctx.createGain();g.gain.setValueAtTime(0.12+Math.random()*0.08,t);g.gain.exponentialRampToValueAtTime(0.001,t+0.04); s.connect(f);f.connect(g);g.connect(this.masterGain);s.start(t);s.stop(t+0.05);} }
+  floppyStep(d=0.6) { if (!this.ctx) return; const n=this.ctx.currentTime,s=Math.floor(d/0.08); for(let i=0;i<s;i++){const t=n+i*0.08,o=this.ctx.createOscillator();o.type='square';o.frequency.value=150+Math.random()*80; const g=this.ctx.createGain();g.gain.setValueAtTime(0.06,t);g.gain.setValueAtTime(0.06,t+0.03);g.gain.exponentialRampToValueAtTime(0.001,t+0.06); const f=this.ctx.createBiquadFilter();f.type='lowpass';f.frequency.value=800; o.connect(f);f.connect(g);g.connect(this.masterGain);o.start(t);o.stop(t+0.06); const cb=this.ctx.createBuffer(1,128,this.ctx.sampleRate),cd=cb.getChannelData(0);for(let j=0;j<128;j++)cd[j]=(Math.random()*2-1)*(1-j/128); const cs=this.ctx.createBufferSource();cs.buffer=cb;const cg=this.ctx.createGain();cg.gain.setValueAtTime(0.08,t);cg.gain.exponentialRampToValueAtTime(0.001,t+0.02);cs.connect(cg);cg.connect(this.masterGain);cs.start(t);cs.stop(t+0.03);} }
+  startHum() { if (!this.ctx||this.humOsc) return; this.humOsc=this.ctx.createOscillator();this.humOsc.type='sine';this.humOsc.frequency.value=60; this.humGain=this.ctx.createGain();this.humGain.gain.value=0.02; const f=this.ctx.createBiquadFilter();f.type='lowpass';f.frequency.value=120; this.humOsc.connect(f);f.connect(this.humGain);this.humGain.connect(this.masterGain);this.humOsc.start(); }
+  stopHum() { if(this.humGain){this.humGain.gain.exponentialRampToValueAtTime(0.001,this.ctx.currentTime+0.5);setTimeout(()=>{try{this.humOsc?.stop();}catch(e){}this.humOsc=null;this.humGain=null;},600);} }
+  dataTransfer(d=0.4) { if (!this.ctx) return; const n=this.ctx.currentTime,t=Math.floor(d/0.03); for(let i=0;i<t;i++){const tt=n+i*0.03+Math.random()*0.01,o=this.ctx.createOscillator();o.type='square';o.frequency.value=4000+Math.random()*3000; const g=this.ctx.createGain();g.gain.setValueAtTime(0.02,tt);g.gain.exponentialRampToValueAtTime(0.001,tt+0.015);o.connect(g);g.connect(this.masterGain);o.start(tt);o.stop(tt+0.02);} }
+  chime() { if (!this.ctx) return; const n=this.ctx.currentTime; [0,0.15].forEach((off,i)=>{const o=this.ctx.createOscillator();o.type='sine';o.frequency.value=i===0?523:784; const g=this.ctx.createGain();g.gain.setValueAtTime(0,n+off);g.gain.linearRampToValueAtTime(0.12,n+off+0.03);g.gain.exponentialRampToValueAtTime(0.001,n+off+0.5);o.connect(g);g.connect(this.masterGain);o.start(n+off);o.stop(n+off+0.5);}); }
+  click() { if (!this.ctx) return; const o=this.ctx.createOscillator();o.type='sine';o.frequency.value=1200; const g=this.ctx.createGain();g.gain.setValueAtTime(0.06,this.ctx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,this.ctx.currentTime+0.06);o.connect(g);g.connect(this.masterGain);o.start();o.stop(this.ctx.currentTime+0.06); }
+}
+const audio = new BapAudio();
+
+// ============================================================
+// BOOT THEATER CONFIG
+// ============================================================
+const BOOT_LINES = [
+  { type:"text", text:"BapOS v5.0 — Weyland Tavern Edition", delay:500, sound:"postBeep" },
+  { type:"text", text:"Copyright (c) 2024-2026 Weyland University.", delay:300 },
+  { type:"text", text:"", delay:200 },
+  { type:"text", text:"BIOS: Catgirl Advanced Runtime v2.6", delay:400, sound:"floppy" },
+  { type:"text", text:"Performing POST checks...", delay:500, sound:"hddShort" },
+  { type:"text", text:"CPU: Baphomet Nya-Core 9000 @ 4.2 GHz .......... OK", delay:400, sound:"data" },
+  { type:"text", text:"RAM: 64GB (16GBx4) DDR5-6666 RAM ............... OK", delay:400, sound:"data" },
+  { type:"text", text:"VGA: Weyland WX 9090 GFX (Kressa Edition, 16GB VRAM) ... OK", delay:350, sound:"data" },
+  { type:"text", text:"HDD: 2TB Okamicore K970 NvMe SSD ................ OK", delay:320, sound:"data" },
+  { type:"text", text:"NIC: PawLink Gigabit S20 LAN .................... OK", delay:300, sound:"data" },
+  { type:"text", text:"", delay:300 },
+  { type:"text", text:"Loading kernel modules...", delay:400, sound:"hdd" },
+  { type:"progress", text:"  Loading nya_filesystem.ko", delay:600, sound:"hdd" },
+  { type:"text", text:"  [OK] nya_filesystem.ko", delay:150 },
+  { type:"progress", text:"  Loading anti_slop_engine.ko", delay:500, sound:"floppy" },
+  { type:"text", text:"  [OK] anti_slop_engine.ko", delay:150 },
+  { type:"text", text:"", delay:300 },
+  { type:"text", text:"Initializing campus network...", delay:400, sound:"hddShort" },
+  { type:"progress", text:"  Connecting to Weyland University Database", delay:700, sound:"hddLong" },
+  { type:"text", text:"  [OK] Campus is awake", delay:200 },
+  { type:"progress", text:"  Verifying enrollment records", delay:500, sound:"floppy" },
+  { type:"text", text:"  [OK] Welcome back, student", delay:200 },
+  { type:"text", text:"", delay:300 },
+  { type:"text", text:"All systems nominal. Class is in session.", delay:500 },
+  { type:"text", text:"", delay:200 },
+  { type:"text", text:"Starting BapOS launcher...", delay:600, sound:"hdd" },
+];
+
+function playSound(name) {
+  if (!name) return;
+  switch(name) {
+    case "postBeep": audio.postBeep(); break;
+    case "hdd": audio.hddSeek(0.6); break;
+    case "hddShort": audio.hddSeek(0.3); break;
+    case "hddLong": audio.hddSeek(1.2); break;
+    case "floppy": audio.floppyStep(0.5); break;
+    case "data": audio.dataTransfer(0.2); break;
+    case "chime": audio.chime(); break;
+    case "click": audio.click(); break;
+  }
+}
+
+// ============================================================
+// SCREEN + STATE
+// ============================================================
+const $ = id => document.getElementById(id);
+function showScreen(id) { document.querySelectorAll('.screen').forEach(s => s.classList.remove('active')); $(id).classList.add('active'); }
+
+const N = window.WeyTavNative || null;
+function nGet(fn, fallback) { try { return N ? N[fn]() : fallback; } catch(e) { return fallback; } }
+function nCall(fn, arg) { try { if(N)(arg===undefined?N[fn]():N[fn](arg)); else console.log('preview:',fn,arg); } catch(e){console.log(e);} }
+
+let appState = { installed: false, version: null, soundOn: true, serverRunning: false, serverLaunched: false };
+function loadState() {
+  try { appState = JSON.parse(nGet('getStateJson', JSON.stringify(appState))); } catch(e) {}
+  audio.setMuted(!appState.soundOn);
+}
+
+// ============================================================
+// BOOT THEATER
+// ============================================================
+let bootSkipped = false, bootTimers = [];
+function bootTimeout(fn,ms) { const t=setTimeout(fn,ms); bootTimers.push(t); return t; }
+function clearBoot() { bootTimers.forEach(clearTimeout); bootTimers=[]; }
+
+function lc(t){if(t.includes('[OK]'))return'bootline ok';if(t.includes('[SKIP]'))return'bootline skip';if(t.includes('Class is in session')||t.includes('registered to the Weyland Network'))return'bootline welcome';if(t.includes('BapOS v')||t.includes('WEYLAND'))return'bootline boldline';return'bootline';}
+
+// Shared line-by-line typewriter player, used by both the normal boot
+// sequence and the first-enrollment device-recognition intro.
+function playLineSequence(lines, skippable, onDone) {
+  bootSkipped = false;
+  if (skippable) {
+    $('skipHint').style.display = 'block';
+    $('boot').onclick = () => { if(!bootSkipped){bootSkipped=true;clearBoot();audio.stopHum();onDone(true);} };
+  } else { $('skipHint').style.display='none'; $('boot').onclick=null; }
+  const linesEl=$('bootLines'),scrollEl=$('bootScroll'),progWrap=$('progWrap'),progText=$('progText'),progBar=$('progBarInner');
+  let idx=0;
+  function sd(){scrollEl.scrollTop=scrollEl.scrollHeight;}
+  function addLine(){
+    if(bootSkipped)return; if(idx>=lines.length){onDone(false);return;}
+    const cur=lines[idx];idx++;
+    if(cur.type==='progress'){playSound(cur.sound);progText.textContent=cur.text;progBar.style.width='0%';progWrap.style.display='block';
+      let elapsed=0;const step=50;const iv=setInterval(()=>{if(bootSkipped){clearInterval(iv);return;}elapsed+=step;const p=Math.min(elapsed/cur.delay,1);progBar.style.width=(Math.min(p+(Math.random()*0.03-0.015),1)*100)+'%';if(elapsed>=cur.delay){clearInterval(iv);progWrap.style.display='none';bootTimeout(addLine,60);}sd();},step);bootTimers.push(iv);
+    } else {playSound(cur.sound);const div=document.createElement('div');div.className=lc(cur.text);div.textContent=cur.text||'\u00A0';linesEl.appendChild(div);sd();bootTimeout(addLine,cur.delay);}
+  }
+  addLine();
+}
+
+function runBootTheater(skippable) {
+  showScreen('boot'); $('bootLines').innerHTML = '';
+  audio.startHum();
+  playLineSequence(BOOT_LINES, skippable, (skippedEarly) => {
+    if (skippedEarly) { runSplash(true); return; }
+    bootTimeout(()=>runSplash(false),400);
+  });
+}
+
+function runSplash(fast) { showScreen('splash'); audio.stopHum(); audio.chime(); setTimeout(enterHome, fast?800:2200); }
+
+// ============================================================
+// INSTALL MODE
+// ============================================================
+let installLineEl = null;
+function installPrint(text,cls) { const div=document.createElement('div');div.className='bootline '+(cls||'');div.textContent=text||'\u00A0';$('bootLines').appendChild(div);$('bootScroll').scrollTop=$('bootScroll').scrollHeight;return div; }
+// ---- Install theater: fake POST + banner before the real install events ----
+const WEYLAND_BANNER = [
+  ['██╗    ██╗███████╗██╗   ██╗██╗      █████╗ ███╗   ██╗██████╗ ','wine'],
+  ['██║    ██║██╔════╝╚██╗ ██╔╝██║     ██╔══██╗████╗  ██║██╔══██╗','wine'],
+  ['██║ █╗ ██║█████╗   ╚████╔╝ ██║     ███████║██╔██╗ ██║██║  ██║','pink'],
+  ['██║███╗██║██╔══╝    ╚██╔╝  ██║     ██╔══██║██║╚██╗██║██║  ██║','pink'],
+  ['╚███╔███╔╝███████╗   ██║   ███████╗██║  ██║██║ ╚████║██████╔╝','rose'],
+  [' ╚══╝╚══╝ ╚══════╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═════╝ ','rose'],
+];
+function printBanner() {
+  WEYLAND_BANNER.forEach(([t,c]) => { const d=installPrint(t,c); d.classList.add('asciiBanner'); });
+  installPrint('──────────────  T A V E R N  ──────────────','pink');
+  installPrint('   Admissions Office — powered by BapOS v5.0','boldline');
+  installPrint('');
+}
+
+const INSTALL_POST = [
+  { text:'WU-BIOS v6.66 — Weyland Tavern BapOS Mobile Edition', delay:500, sound:'postBeep', cls:'boldline' },
+  { text:'Copyright (c) 2024-2026 Weyland University.', delay:350 },
+  { text:'', delay:250 },
+  { text:'Performing registration POST...', delay:450, sound:'hddShort' },
+  { text:'Detecting device hardware...', delay:350, sound:'hddShort' },
+  { text:'CPU: Baphomet Nya-Core 9000 @ 4.2 GHz .......... OK', delay:350, sound:'data' },
+  { text:'RAM: 64GB (16GBx4) DDR5-6666 RAM ............... OK', delay:320, sound:'data' },
+  { text:'VGA: Weyland WX 9090 GFX (Kressa Edition, 16GB VRAM) ... OK', delay:320, sound:'data' },
+  { text:'HDD: 2TB Okamicore K970 NvMe SSD ................ OK', delay:320, sound:'data' },
+  { text:'NIC: PawLink Gigabit S20 LAN .................... OK', delay:320, sound:'data' },
+  { text:'', delay:250 },
+  { type:'memcheck', delay:900, sound:'hdd' },
+  { text:'', delay:250 },
+  { text:'Mounting Weyland Tavern Database ............... OK', delay:350, sound:'floppy' },
+  { text:'Configuring Registrar ........................... OK', delay:400, sound:'hddShort' },
+  { text:'Submitting Student Application .................. OK', delay:350, sound:'floppy' },
+  { text:'', delay:250 },
+  { text:'Hardware check passed, Application accepted.', delay:500, cls:'welcome' },
+  { text:'Launching BapOS-Weytav-Launcher.exe...', delay:450 },
+  { text:'', delay:300 },
+];
+
+let installTheaterActive = false, installTheaterTimers = [], installEventQueue = [];
+function instTimeout(fn,ms){ const t=setTimeout(fn,ms); installTheaterTimers.push(t); return t; }
+function endInstallTheater(finalLine) {
+  installTheaterTimers.forEach(clearTimeout); installTheaterTimers=[];
+  installTheaterActive=false;
+  $('skipHint').style.display='none'; $('boot').onclick=null;
+  installPrint(finalLine); installPrint('');
+  const q=installEventQueue; installEventQueue=[];
+  q.forEach(handleInstallEvent);
+}
+
+function startInstallScreen(isUpdate) {
+  showScreen('boot'); $('bootLines').innerHTML=''; $('progWrap').style.display='none';
+  audio.startHum();
+  installLineEl=null; installEventQueue=[]; installTheaterActive=true;
+  const finalLine = isUpdate ? 'Synchronizing campus records...' : 'Submitting your application to Weyland University...';
+
+  if (isUpdate) {
+    // Updates & repairs get the short ceremony — banner and go.
+    printBanner();
+    endInstallTheater(finalLine);
+    return;
+  }
+
+  // Fresh installs get the whole POST experience.
+  $('skipHint').style.display='block';
+  $('boot').onclick = () => { // fast-forward: banner + go
+    if (!installTheaterActive) return;
+    installTheaterTimers.forEach(clearTimeout); installTheaterTimers=[];
+    $('bootLines').innerHTML='';
+    printBanner();
+    endInstallTheater(finalLine);
+  };
+
+  let idx=0;
+  function step() {
+    if (!installTheaterActive) return;
+    if (idx >= INSTALL_POST.length) {
+      printBanner();
+      endInstallTheater(finalLine);
+      return;
+    }
+    const cur = INSTALL_POST[idx]; idx++;
+    playSound(cur.sound);
+    if (cur.type === 'memcheck') {
+      const line = installPrint('Memory check: 0 KB');
+      const total = 67108864, steps = 14, dur = cur.delay;
+      let s = 0;
+      const iv = setInterval(() => {
+        if (!installTheaterActive) { clearInterval(iv); return; }
+        s++;
+        if (s >= steps) {
+          clearInterval(iv);
+          line.textContent = 'Memory check: ' + total.toLocaleString() + ' KB OK';
+          line.className = 'bootline ok';
+          instTimeout(step, 150);
+        } else {
+          line.textContent = 'Memory check: ' + Math.floor(total*s/steps).toLocaleString() + ' KB';
+          if (s % 4 === 0) audio.dataTransfer(0.1);
+        }
+        $('bootScroll').scrollTop = $('bootScroll').scrollHeight;
+      }, dur/steps);
+      installTheaterTimers.push(iv);
+    } else {
+      installPrint(cur.text, cur.cls);
+      instTimeout(step, cur.delay);
+    }
+  }
+  step();
+}
+
+window.installEvent = function(jsonStr) {
+  if (installTheaterActive) {
+    // Errors interrupt the show; everything else waits in the wings.
+    let peek; try{peek=JSON.parse(jsonStr);}catch(e){return;}
+    if (peek.type === 'installError') {
+      installTheaterTimers.forEach(clearTimeout); installTheaterTimers=[];
+      installTheaterActive=false; installEventQueue=[];
+      $('skipHint').style.display='none'; $('boot').onclick=null;
+    } else {
+      installEventQueue.push(jsonStr);
+      return;
+    }
+  }
+  handleInstallEvent(jsonStr);
+};
+
+function handleInstallEvent(jsonStr) {
+  let ev; try{ev=JSON.parse(jsonStr);}catch(e){return;}
+  const fmtMB = b => (b/1048576).toFixed(1)+' MB';
+  switch(ev.type){
+    case 'downloadStart': audio.hddSeek(0.8); installPrint('Requesting campus blueprints from the Registrar...'); installLineEl=installPrint('  Downloading: 0.0 MB'); break;
+    case 'downloadProgress': if(installLineEl)installLineEl.textContent='  Downloading: '+fmtMB(ev.bytes); if(ev.bytes%(20*1048576)<600000)audio.dataTransfer(0.15); break;
+    case 'downloadDone': if(installLineEl){installLineEl.textContent='  [OK] Blueprints received — '+fmtMB(ev.bytes);installLineEl.className='bootline ok';} audio.chime(); break;
+    case 'cleanStart': audio.hddSeek(0.6); installPrint('Wiping the chalk boards clean (keeping your student records safe)...'); break;
+    case 'cleanDone': installPrint('  [OK] Old records cleared','ok'); break;
+    case 'extractStart': audio.floppyStep(0.6); installPrint('Processing enrollment paperwork...'); installLineEl=installPrint('  Filing documents: 0'); break;
+    case 'extractProgress': if(installLineEl)installLineEl.textContent='  Filing documents: '+ev.files+(ev.name?' ('+ev.name+')':''); if(ev.files%200===0)audio.hddSeek(0.2); break;
+    case 'extractDone': if(installLineEl){installLineEl.textContent='  [OK] '+ev.files+' documents filed';installLineEl.className='bootline ok';} break;
+    case 'modulesStart': audio.floppyStep(0.6); installPrint('Issuing your student ID and dorm key...'); installLineEl=installPrint('  Stamping: 0'); break;
+    case 'modulesProgress': if(installLineEl)installLineEl.textContent='  Stamping: '+ev.files; if(ev.files%300===0)audio.dataTransfer(0.15); break;
+    case 'modulesDone': if(installLineEl){installLineEl.textContent='  [OK] Student ID issued, nya~';installLineEl.className='bootline ok';} break;
+    case 'versionSaved': installPrint('  [OK] Enrollment record: '+(ev.version||'').substring(0,10),'ok'); break;
+    case 'installDone': audio.chime(); installPrint(''); installPrint('Enrollment complete! Welcome to Weyland University.','welcome'); installPrint(''); loadState(); setTimeout(()=>runSplash(false),1500); break;
+    case 'installError': audio.stopHum(); showError(ev.message||'Install failed.'); break;
+  }
+};
+
+// ============================================================
+// SERVER EVENTS
+// ============================================================
+window.serverEvent = function(jsonStr) {
+  let ev; try{ev=JSON.parse(jsonStr);}catch(e){return;}
+  switch(ev.type){
+    case 'starting': setServerState('starting'); setStatus('Waking the Tavern... first boot can take a few minutes.'); break;
+    case 'up': setServerState('up'); $('statusLine').innerHTML =
+      '<div style="display:inline-block; text-align:left; padding-left:14px;">' +
+      'The Tavern is open!<br>Tap ENTER TAVERN to step inside~<br>' +
+      '<span style="opacity:0.5; font-size:10.5px; font-style:italic;">(psst — button being stubborn? open <b>127.0.0.1:8000</b> in Chrome yourself)</span>' +
+      '</div>'; break;
+    case 'down': setServerState('down'); break;
+    case 'crashed': setServerState('down'); showError('The Tavern server stopped unexpectedly. 😿 Check the logs for clues — close and reopen the app to try again.'); break;
+    case 'updateAvailable': $('btnUpdate').style.display='flex'; setStatus('An update is available for Weyland Tavern! ✨'); break;
+    case 'status': setStatus(ev.message||''); break;
+  }
+};
+
+function setServerState(s) {
+  appState.serverRunning = (s==='up');
+  const dot=$('serverDot'),txt=$('serverStateText');
+  dot.className = s==='up'?'dotUp':s==='starting'?'dotStarting':'dotDown';
+  txt.textContent = s==='up'?'Server online':s==='starting'?'Server starting...':'Server offline';
+  $('btnOpen').classList.toggle('disabled', s!=='up');
+  $('btnLaunch').classList.toggle('disabled', s==='up'||s==='starting');
+}
+function setStatus(msg) { $('statusLine').textContent = msg; }
+
+// ============================================================
+// HOME
+// ============================================================
+function enterHome() {
+  showScreen('home'); startClock(); loadState();
+  $('verLine').textContent = 'BapOS v5.0 — WT '+(appState.version?appState.version.substring(0,8):'unknown');
+  if (appState.serverRunning) setServerState('up');
+  else if (appState.serverLaunched) setServerState('starting');
+  else setServerState('down');
+  nCall('onHomeReady');
+}
+
+let clockStarted=false;
+function startClock(){if(clockStarted)return;clockStarted=true;const el=$('clock');function tick(){const n=new Date();el.innerHTML=n.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+'<span class="date">'+n.toLocaleDateString([],{month:'short',day:'numeric'})+'</span>';}tick();setInterval(tick,1000);}
+
+$('btnLaunch').addEventListener('click', () => { audio.click(); audio.hddSeek(1.0); setServerState('starting'); setStatus('Spinning up the Tavern, nya~'); nCall('launchServer'); });
+$('btnOpen').addEventListener('click', () => { audio.click(); audio.chime(); nCall('openTavern'); });
+$('btnUpdate').addEventListener('click', () => { audio.click(); if(appState.serverRunning){setStatus('Shut down the server first, then update!');return;} startInstallScreen(true); nCall('applyUpdate'); });
+$('btnStop').addEventListener('click', () => { audio.click(); runShutdown(); });
+$('btnCommunity').addEventListener('click', () => { audio.click(); nCall('openExternalUrl','https://linktr.ee/WeylandUniversity'); });
+
+function runShutdown() {
+  showScreen('shutdown'); audio.floppyStep(0.8);
+  const lines=['Tucking in the Tavern...','Dimming the campus lights...','Locking the front gate...','Sweet dreams, nya~ 🌙'];
+  let i=0; const iv=setInterval(()=>{i++;if(i<lines.length){$('shutdownText').textContent=lines[i];audio.hddSeek(0.25);}else{clearInterval(iv);audio.chime();setTimeout(()=>nCall('stopApp'),700);}},750);
+}
+
+// ============================================================
+// SETTINGS / LOGS / ERROR
+// ============================================================
+$('gearBtn').addEventListener('click', () => { audio.click(); $('setSound').textContent=appState.soundOn?'ON':'OFF'; $('setVersion').textContent=appState.version||'not installed'; showScreen('settings'); });
+$('settingsClose').addEventListener('click', () => { audio.click(); enterHome(); });
+$('setAbout').addEventListener('click', () => { audio.click(); showScreen('about'); });
+$('aboutClose').addEventListener('click', () => { audio.click(); showScreen('settings'); });
+document.querySelectorAll('.aboutLink[data-url]').forEach(el => {
+  el.addEventListener('click', () => { audio.click(); nCall('openExternalUrl', el.dataset.url); });
+});
+$('setSound').addEventListener('click', () => { appState.soundOn=!appState.soundOn; audio.setMuted(!appState.soundOn); nCall('setSoundPref',appState.soundOn?'on':'off'); $('setSound').textContent=appState.soundOn?'ON':'OFF'; audio.click(); });
+$('setBattery').addEventListener('click', () => { audio.click(); nCall('requestBatteryExemption'); });
+$('setLogs').addEventListener('click', () => { audio.click(); openLogs(); });
+$('setRepair').addEventListener('click', () => { audio.click(); if(appState.serverRunning){alert('Shut down the server first, then repair.');return;} if(confirm('Repair Weyland Tavern? This wipes app files back to a clean official copy (~700MB re-download) and fixes broken updates. Your chats, characters and settings are NOT touched.')){startInstallScreen(true);nCall('repairInstall');} });
+$('setReinstall').addEventListener('click', () => { audio.click(); if(appState.serverRunning){alert('Close and reopen the app first, then reinstall.');return;} if(confirm('Reinstall? Wipes everything including chats, re-downloads ~700MB.')){startInstallScreen(false);nCall('reinstall');} });
+$('setDelete').addEventListener('click', () => { audio.click(); if(appState.serverRunning){alert('Close and reopen the app first, then delete.');return;} if(confirm('Delete Weyland Tavern? Chats and settings will be lost.')){nCall('deleteInstall');loadState();} });
+
+function openLogs() { showScreen('logs'); $('logBody').textContent=nGet('getLogs','(preview mode)'); $('logBody').scrollTop=$('logBody').scrollHeight; }
+$('logRefresh').addEventListener('click', () => { audio.click(); openLogs(); });
+$('logCopy').addEventListener('click', () => { audio.click(); nCall('copyLogs'); });
+$('logClose').addEventListener('click', () => { audio.click(); enterHome(); });
+
+function showError(msg) { $('errMsg').textContent=msg; showScreen('error'); }
+$('errLogs').addEventListener('click', () => { audio.click(); openLogs(); });
+$('errHome').addEventListener('click', () => { audio.click(); loadState(); appState.installed?enterHome():showScreen('welcome'); });
+
+// ============================================================
+// WELCOME (battery + enroll)
+// ============================================================
+$('btnBattery').addEventListener('click', () => { audio.click(); nCall('requestBatteryExemption'); $('btnBattery').querySelector('.sub').textContent='Request sent! Check the popup.'; });
+$('btnEnroll').addEventListener('click', () => { audio.init(); startInstallScreen(false); nCall('beginInstall'); });
+
+// ============================================================
+// ENTRY FLOW
+// ============================================================
+$('gate').addEventListener('click', () => {
+  audio.init(); loadState();
+  if (!appState.installed) showScreen('greeting'); // Kressa's orientation first
+  else runSplash(true); // skip full boot on return visits — straight to splash
+});
+$('btnGreetContinue').addEventListener('click', () => { audio.click(); showScreen('welcome'); });
+
+window.addEventListener('load', () => {
+  loadState();
+  if (location.hash === '#home') { enterHome(); }
+  else { showScreen('gate'); }
+});
+</script>
+</body>
+</html>
