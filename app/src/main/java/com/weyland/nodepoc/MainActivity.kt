@@ -54,6 +54,13 @@ class MainActivity : AppCompatActivity() {
     private val logFile: File get() = File(filesDir, "tavern.log")
     private var pollerRunning = false
 
+    // Set while a Repair-triggered character redownload has its own
+    // temporary server up. The status poller checks this so it doesn't
+    // mistake that internal server for a real launch — without this, the
+    // poller sees "up" then "down" a few seconds later and reports a false
+    // "server crashed" the moment the temporary server shuts down.
+    @Volatile private var internalServerBusy = false
+
     // ==================================================================
     // Lifecycle
     // ==================================================================
@@ -132,6 +139,7 @@ class MainActivity : AppCompatActivity() {
             state.put("soundOn", prefs.getString("sound", "on") == "on")
             state.put("serverRunning", isServerRunning())
             state.put("serverLaunched", wasServerLaunched())
+            state.put("everLaunched", prefs.getBoolean("everLaunched", false))
             return state.toString()
         }
 
@@ -164,7 +172,7 @@ class MainActivity : AppCompatActivity() {
         fun applyUpdate() = Thread { performInstall(isUpdate = true) }.start()
 
         @JavascriptInterface
-        fun repairInstall() = Thread {
+        fun repairInstall(redownloadCharacters: Boolean) = Thread {
             // Unlike Update (which only overlays new files on top of old
             // ones), Repair wipes SillyTavern/ back to a clean slate first —
             // this is the mobile equivalent of the desktop tool's
@@ -172,7 +180,12 @@ class MainActivity : AppCompatActivity() {
             // stray/corrupted files a bad update left behind, since a zip
             // overlay never deletes anything. SillyTavern/data (chats,
             // characters, settings) is never touched.
-            performInstall(isUpdate = true, forceModules = true, deepClean = true)
+            performInstall(
+                isUpdate = true,
+                forceModules = true,
+                deepClean = true,
+                redownloadChars = redownloadCharacters,
+            )
         }.start()
 
         @JavascriptInterface
@@ -290,7 +303,40 @@ class MainActivity : AppCompatActivity() {
     // Install / update
     // ==================================================================
 
-    private fun performInstall(isUpdate: Boolean, forceModules: Boolean = false, deepClean: Boolean = false) {
+    private val dataBackupDir: File get() = File(filesDir, "data-backup-pre-repair")
+
+    private fun performInstall(
+        isUpdate: Boolean,
+        forceModules: Boolean = false,
+        deepClean: Boolean = false,
+        redownloadChars: Boolean = false,
+    ) {
+        // BapOS's "shut down first" gate on the JS side trusts a snapshot of
+        // app state that isn't always freshly refreshed. Deep-clean deletes
+        // files out from under a running server, so double-check for real
+        // here — before spending a ~700MB download on a repair that's about
+        // to fail anyway.
+        if (deepClean && isServerRunning()) {
+            pushInstallEvent(
+                JSONObject().put("type", "installError")
+                    .put("message", "The server is still running — shut it down first, then repair.")
+            )
+            return
+        }
+
+        // BapOS's Settings screen already hides/disables Repair until the
+        // server has come up successfully once, but the button click isn't
+        // the only path here — check again server-side. Repairing an
+        // install that's never actually run isn't "fixing a broken update,"
+        // it's just a confusing reinstall wearing the wrong label.
+        if (deepClean && !prefs.getBoolean("everLaunched", false)) {
+            pushInstallEvent(
+                JSONObject().put("type", "installError")
+                    .put("message", "Launch Weyland Tavern successfully at least once before using Repair.")
+            )
+            return
+        }
+
         try {
             installDir.mkdirs()
 
@@ -302,10 +348,36 @@ class MainActivity : AppCompatActivity() {
             pushInstallEvent(JSONObject().put("type", "downloadDone").put("bytes", zipFile.length()))
 
             // Download succeeded — safe to start deleting old files now.
-            // Wipe everything under SillyTavern/ except data/ (chats,
-            // characters, personas, settings), so the fresh extract below
-            // lands on a truly clean slate instead of overlaying on cruft.
             if (deepClean) {
+                // Safety net before anything destructive happens: copy
+                // data/ (chats, characters, personas, settings) somewhere
+                // outside installDir. deepClean below is never supposed to
+                // touch data/, but this is cheap insurance against a bug in
+                // that exclusion logic — mirrors the desktop repair tool's
+                // optional pre-repair backup. Overwrites any backup from a
+                // previous repair rather than accumulating them forever.
+                pushInstallEvent(JSONObject().put("type", "backupStart"))
+                try {
+                    val dataDir = File(installDir, "SillyTavern/data")
+                    if (dataDir.exists()) {
+                        dataBackupDir.deleteRecursively()
+                        dataDir.copyRecursively(dataBackupDir, overwrite = true)
+                        pushInstallEvent(JSONObject().put("type", "backupDone"))
+                    } else {
+                        pushInstallEvent(JSONObject().put("type", "backupSkipped"))
+                    }
+                } catch (e: Exception) {
+                    // Non-fatal — proceed with repair anyway, but tell the user.
+                    pushInstallEvent(
+                        JSONObject().put("type", "backupFailed")
+                            .put("message", e.message ?: e.javaClass.simpleName)
+                    )
+                }
+
+                // Wipe everything under SillyTavern/ except data/, so the
+                // fresh extract below lands on a truly clean slate instead
+                // of overlaying on cruft. Mobile equivalent of the desktop
+                // tool's `git reset --hard`.
                 pushInstallEvent(JSONObject().put("type", "cleanStart"))
                 val stDir = File(installDir, "SillyTavern")
                 stDir.listFiles()?.forEach { child ->
@@ -335,11 +407,142 @@ class MainActivity : AppCompatActivity() {
             if (sha != null) prefs.edit().putString("version", sha).apply()
             pushInstallEvent(JSONObject().put("type", "versionSaved").put("version", sha ?: "unknown"))
 
+            // Sanity-check the result before declaring victory. Not as
+            // rigorous as desktop's git tree comparison (no git here), but
+            // catches the failure mode that matters: files that silently
+            // didn't land.
+            val serverJsOk = File(installDir, "SillyTavern/server.js").exists()
+            val moduleCount = File(installDir, "SillyTavern/node_modules").listFiles()?.size ?: 0
+            val nodeModulesOk = moduleCount > 20
+            if (serverJsOk && nodeModulesOk) {
+                pushInstallEvent(JSONObject().put("type", "verifyOk"))
+            } else {
+                pushInstallEvent(
+                    JSONObject().put("type", "verifyFailed")
+                        .put("serverJsOk", serverJsOk)
+                        .put("moduleCount", moduleCount)
+                )
+            }
+
+            if (redownloadChars) {
+                performCharacterRedownload()
+            }
+
             pushInstallEvent(JSONObject().put("type", "installDone"))
         } catch (e: Exception) {
             pushInstallEvent(
                 JSONObject().put("type", "installError")
                     .put("message", "Setup failed: ${e.javaClass.simpleName} — ${e.message}. Check connection and free storage, then Settings → Reinstall.")
+            )
+        }
+    }
+
+    // ==================================================================
+    // Character re-download (mirrors desktop repair's optional step)
+    // ==================================================================
+
+    private fun performCharacterRedownload() {
+        pushInstallEvent(JSONObject().put("type", "charsStart"))
+
+        // A poller thread from an earlier session may still be watching
+        // port 8000 in the background. Suppress it for the duration so it
+        // doesn't mistake our temporary server for a real launch — and
+        // doesn't report a false "crashed" the moment we shut it down again.
+        internalServerBusy = true
+        try {
+            val bootstrap = File(filesDir, "bootstrap.js")
+            assets.open("bootstrap.js").use { input -> FileOutputStream(bootstrap).use { input.copyTo(it) } }
+            val cacert = File(filesDir, "cacert.pem")
+            try {
+                assets.open("cacert.pem").use { input -> FileOutputStream(cacert).use { input.copyTo(it) } }
+            } catch (e: Exception) { /* TLS just won't verify if this is missing */ }
+
+            NodeService.start(
+                this,
+                installDir = installDir.absolutePath,
+                logFile = logFile.absolutePath,
+                bootstrapPath = bootstrap.absolutePath,
+            )
+
+            var up = false
+            for (i in 0 until 150) {
+                if (isServerRunning()) { up = true; break }
+                Thread.sleep(2000)
+            }
+
+            if (!up) {
+                pushInstallEvent(JSONObject().put("type", "charsTimeout"))
+            } else {
+                redownloadCharactersViaApi()
+            }
+
+            NodeService.stop(this)
+            // Give the process a moment to actually exit before releasing
+            // the guard, so a lingering poller tick doesn't slip through.
+            Thread.sleep(1500)
+        } finally {
+            internalServerBusy = false
+        }
+    }
+
+    private fun redownloadCharactersViaApi() {
+        try {
+            val tokenConn = URL("http://127.0.0.1:8000/csrf-token").openConnection() as HttpURLConnection
+            tokenConn.connectTimeout = 10000
+            tokenConn.readTimeout = 30000
+            val cookie = tokenConn.headerFields["Set-Cookie"]?.joinToString("; ") { it.substringBefore(";") } ?: ""
+            val token = JSONObject(tokenConn.inputStream.bufferedReader().readText()).getString("token")
+            tokenConn.disconnect()
+
+            val manifestConn = URL("http://127.0.0.1:8000/api/weyland/fetch-manifests").openConnection() as HttpURLConnection
+            manifestConn.setRequestProperty("X-Csrf-Token", token)
+            manifestConn.setRequestProperty("X-User-Handle", "default-user")
+            manifestConn.setRequestProperty("X-Rebuild-Manifest", "1")
+            if (cookie.isNotEmpty()) manifestConn.setRequestProperty("Cookie", cookie)
+            manifestConn.connectTimeout = 10000
+            manifestConn.readTimeout = 300000
+            val manifests = JSONObject(manifestConn.inputStream.bufferedReader().readText())
+            manifestConn.disconnect()
+
+            val characters = manifests.optJSONObject("localManifest")?.optJSONArray("characters")
+            val names = mutableListOf<String>()
+            if (characters != null) {
+                for (i in 0 until characters.length()) {
+                    val ch = characters.getJSONObject(i)
+                    if (!ch.isNull("version") && ch.has("version")) names.add(ch.getString("name"))
+                }
+            }
+
+            if (names.isEmpty()) {
+                pushInstallEvent(JSONObject().put("type", "charsNone"))
+                return
+            }
+            pushInstallEvent(JSONObject().put("type", "charsFound").put("count", names.size))
+
+            val dlConn = URL("http://127.0.0.1:8000/api/weyland/download").openConnection() as HttpURLConnection
+            dlConn.requestMethod = "POST"
+            dlConn.doOutput = true
+            dlConn.setRequestProperty("X-Csrf-Token", token)
+            dlConn.setRequestProperty("X-User-Handle", "default-user")
+            dlConn.setRequestProperty("X-Redownload", "true")
+            dlConn.setRequestProperty("Content-Type", "application/json")
+            if (cookie.isNotEmpty()) dlConn.setRequestProperty("Cookie", cookie)
+            dlConn.connectTimeout = 10000
+            dlConn.readTimeout = 7200000
+            val body = JSONObject().put("characters", org.json.JSONArray(names)).toString()
+            dlConn.outputStream.use { it.write(body.toByteArray()) }
+            val result = JSONObject(dlConn.inputStream.bufferedReader().readText())
+            dlConn.disconnect()
+
+            if (result.optBoolean("success", false)) {
+                pushInstallEvent(JSONObject().put("type", "charsDone").put("count", names.size))
+            } else {
+                pushInstallEvent(JSONObject().put("type", "charsFailed").put("message", "server reported failure"))
+            }
+        } catch (e: Exception) {
+            pushInstallEvent(
+                JSONObject().put("type", "charsFailed")
+                    .put("message", e.message ?: e.javaClass.simpleName)
             )
         }
     }
@@ -513,11 +716,24 @@ class MainActivity : AppCompatActivity() {
             var wasUp = false
             var downAfterUp = 0
             while (true) {
+                if (internalServerBusy) {
+                    // A Repair-triggered temporary server owns port 8000
+                    // right now — don't let its start/stop look like a
+                    // real launch or a crash.
+                    Thread.sleep(2500)
+                    continue
+                }
                 val up = isServerRunning()
 
                 if (up && !wasUp) {
                     wasUp = true
                     downAfterUp = 0
+                    // The internalServerBusy guard above means this can only
+                    // fire for a real, user-initiated launch — Repair's own
+                    // temporary server is invisible to this poller. Safe to
+                    // treat "we saw it come up" as "the user has successfully
+                    // launched at least once," which gates Repair below.
+                    prefs.edit().putBoolean("everLaunched", true).apply()
                     pushServerEventObj(JSONObject().put("type", "up"))
                 }
                 if (!up && wasUp) {

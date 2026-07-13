@@ -4,9 +4,11 @@
 # For more details, see
 #   https://d.android.com/r/tools/r8/keep-rules
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# BapOS's WeyTavBridge is called by name from bapos.html's JS via
+# addJavascriptInterface — R8 can't see those call sites, so without this
+# rule it would treewalk-strip every @JavascriptInterface method as
+# "unused" the moment minification is ever turned on, silently breaking
+# every button in the UI with no compile error.
+-keepclassmembers class com.weyland.nodepoc.MainActivity$WeyTavBridge {
+    @android.webkit.JavascriptInterface <methods>;
+}
