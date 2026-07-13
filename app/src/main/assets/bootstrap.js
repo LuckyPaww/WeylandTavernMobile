@@ -14,19 +14,14 @@ const path = require('path');
 const ROOT = process.env.WT_ROOT;
 const ST = path.join(ROOT, 'SillyTavern');
 
-// ---- 0. Armor plating ----
+// ---- 0. Crash visibility, without touching console ----
 // Weyland's server-main.js does `console.log = function(){}` right after
-// printing START, which silences ALL later output — including errors.
-// Redefine the console methods as accessor properties whose setter is a
-// no-op: the fork's assignment silently does nothing and logging survives.
-for (const k of ['log', 'debug', 'error', 'warn', 'info']) {
-  const orig = console[k].bind(console);
-  Object.defineProperty(console, k, {
-    get: () => orig,
-    set: () => { /* nice try */ },
-    configurable: true,
-  });
-}
+// printing START — that's an intentional privacy choice (routine internal
+// logging, including things like per-message usage tracking, shouldn't be
+// sitting in a log a support ticket might paste). Mobile respects that the
+// same way desktop's launcher does: nothing here un-silences console.
+// Real crash visibility comes entirely from process.stderr.write below,
+// which was never routed through console and can't be silenced by it.
 
 // Silent process.exit() calls are the worst kind of crash. Make every exit
 // announce itself with a stack trace first. (process.stderr.write, not
@@ -117,6 +112,9 @@ console.log('[bootstrap] ROOT=' + ROOT);
 console.log('[bootstrap] ST=' + ST);
 console.log('[bootstrap] server.js exists=' + fs.existsSync(path.join(ST, 'server.js')));
 import(path.join(ST, 'server.js')).catch(err => {
-  console.error('\n[FATAL] Failed to import server.js:\n' + (err && err.stack ? err.stack : err));
-  process.exit(1);
+  // stderr.write, not console.error — if the import got far enough for
+  // server-main.js's own console nerf to have already run, console.error
+  // would silently vanish here right when it matters most.
+  process.stderr.write('\n[FATAL] Failed to import server.js:\n' + (err && err.stack ? err.stack : err) + '\n');
+  realExit(1);
 });
