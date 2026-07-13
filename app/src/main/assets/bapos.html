@@ -755,7 +755,7 @@ window.serverEvent = function(jsonStr) {
     case 'up': setServerState('up'); $('statusLine').innerHTML =
       '<div style="display:inline-block; text-align:left; padding-left:14px;">' +
       'The Tavern is open!<br>Tap ENTER TAVERN to step inside~<br>' +
-      '<span style="opacity:0.5; font-size:10.5px; font-style:italic;">(psst — button being stubborn? open <b>127.0.0.1:8000</b> in Chrome yourself)</span>' +
+      '<span style="opacity:0.5; font-size:10.5px; font-style:italic;">(psst — button being stubborn? open <b>127.0.0.1:8000</b> in your browser yourself)</span>' +
       '</div>'; break;
     case 'down': setServerState('down'); break;
     case 'crashed': setServerState('down'); showError('The Tavern server stopped unexpectedly. 😿 Check the logs for clues — close and reopen the app to try again.'); break;
