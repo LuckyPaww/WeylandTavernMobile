@@ -739,6 +739,13 @@ function handleInstallEvent(jsonStr) {
       }
       installPrint('');
       loadState();
+      // Any successful install/update/repair just re-synced the local
+      // version to whatever was latest at download time — the "update
+      // available" banner is stale now. Without this, the inline
+      // style='flex' set by the updateAvailable event sits there forever
+      // (this page is never reloaded except on a real app restart, which
+      // is the only reason restarting ever "fixed" it before).
+      $('btnUpdate').style.display='none';
       setTimeout(()=>runSplash(false),1500);
       break;
     case 'installError': audio.stopHum(); showError(ev.message||'Install failed.'); break;
